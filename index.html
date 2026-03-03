@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MB Maritime — DP Task Manager</title>
+<link rel="icon" href="./assets/favicon.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- ─── TOAST CONTAINER ────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<!-- ─── LOGIN SCREEN — Full-Screen Hero ──────────────────────── -->
+<div id="login-screen">
+  <div class="login-hero-bg"></div>
+  <div class="login-hero-overlay"></div>
+
+  <img src="./assets/logo-login.png" alt="MB Maritime" class="login-logo-corner">
+
+  <div class="login-card-wrapper">
+    <div class="login-card">
+      <div class="login-card-header">
+        <h1 class="login-card-title">Bem-vindo</h1>
+        <p class="login-card-sub">Acesse sua conta para continuar</p>
+      </div>
+
+      <!-- Microsoft Login -->
+      <button class="login-ms-btn" onclick="signInWithMicrosoft()">
+        <svg width="20" height="20" viewBox="0 0 23 23"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+        Entrar com Microsoft
+      </button>
+
+      <div class="login-divider"><span>ou entre com email</span></div>
+
+      <!-- Email/Password Login -->
+      <div id="login-form">
+        <div class="login-field">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" placeholder="seu@email.com" autocomplete="email">
+        </div>
+        <div class="login-field">
+          <label for="login-pass">Senha</label>
+          <input type="password" id="login-pass" placeholder="Digite sua senha" autocomplete="current-password">
+        </div>
+        <div id="login-error" class="login-error">Email ou senha incorretos</div>
+        <button type="button" class="login-submit-btn" id="login-btn" onclick="window.__doLogin && window.__doLogin()">
+          Entrar
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="login-copyright">&copy; 2026 MB Maritime Consulting &amp; Training</p>
+  </div>
+</div>
+
+<!-- ─── MAIN DASHBOARD APP ─────────────────────────────────────── -->
+<div id="dashboard-app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <img src="./assets/logo-header.png" alt="MB Maritime" style="height:40px;width:auto"
+           onerror="this.style.display='none';document.getElementById('sb-logo-fallback').style.display='flex'">
+      <div id="sb-logo-fallback" style="display:none" class="sidebar-logo-fallback">
+        <div class="logo-icon">MB</div>
+        <div style="font-size:13px;font-weight:700;line-height:1.2">MB Maritime<br><span style="font-size:11px;font-weight:400;color:var(--color-text-muted)">DP Manager</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section-label">Navegação</div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Dashboard</span>
+      </div>
+      <div class="nav-item" onclick="navigate('tasks')" data-page="tasks">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span>Tarefas</span>
+        <span class="nav-badge hidden" id="nav-overdue-badge">0</span>
+      </div>
+      <div class="nav-item" onclick="navigate('vessels')" data-page="vessels">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 21l.6-1.2A4 4 0 0 1 6.2 17h11.6a4 4 0 0 1 3.6 2.8L22 21"/><path d="M5 17V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10"/><path d="M9 5V3h6v2"/></svg>
+        <span>Embarcações</span>
+      </div>
+      <div class="nav-item" onclick="navigate('inbox')" data-page="inbox">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span>Caixa de Entrada</span>
+        <span class="nav-badge badge-gold-bg hidden" id="nav-inbox-badge">0</span>
+      </div>
+      <div class="nav-item admin-only" onclick="navigate('time')" data-page="time">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Horas</span>
+      </div>
+      <div class="nav-item" onclick="navigate('reports')" data-page="reports">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Relatórios</span>
+      </div>
+    </nav>
+
+    <div style="padding:8px;margin-top:auto">
+      <div class="nav-item" onclick="toggleAIPanel()" style="color:var(--color-accent)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2z"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>Assistente IA</span>
+        <span class="ai-badge" style="font-size:9px">IA</span>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user" onclick="handleLogout()">
+        <div class="user-avatar" id="user-avatar">U</div>
+        <div class="user-info">
+          <div class="user-name" id="user-name">Usuário</div>
+          <div class="user-role" id="user-role">—</div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--color-text-muted);flex-shrink:0"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="topbar-title" id="topbar-title">Dashboard</div>
+    <div class="timer-widget" id="timer-widget" onclick="navigate('time')">
+      <div class="timer-dot"></div>
+      <span id="timer-display">00:00:00</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm admin-only" id="timer-btn" onclick="toggleTimer()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span id="timer-btn-label">Iniciar Timer</span>
+      </button>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Alternar tema">
+        <svg id="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg id="theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- ─── DASHBOARD PAGE ─── -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle" id="dash-date-label">Carregando...</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.46"/></svg>
+          Atualizar
+        </button>
+      </div>
+
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi-card kpi-blue glow-card"><div class="kpi-header"><span class="kpi-label">Total Ativas</span><div class="kpi-icon">📋</div></div><div class="kpi-value num skeleton" style="width:60px;height:36px;border-radius:4px"></div><div class="kpi-sub skeleton" style="width:80px;height:12px;margin-top:8px;border-radius:4px"></div></div>
+        <div class="kpi-card kpi-red glow-card"><div class="kpi-header"><span class="kpi-label">Vencidas</span><div class="kpi-icon">⚠️</div></div><div class="kpi-value num skeleton" style="width:60px;height:36px;border-radius:4px"></div><div class="kpi-sub skeleton" style="width:80px;height:12px;margin-top:8px;border-radius:4px"></div></div>
+        <div class="kpi-card kpi-orange glow-card"><div class="kpi-header"><span class="kpi-label">Venc. 7 dias</span><div class="kpi-icon">⏰</div></div><div class="kpi-value num skeleton" style="width:60px;height:36px;border-radius:4px"></div><div class="kpi-sub skeleton" style="width:80px;height:12px;margin-top:8px;border-radius:4px"></div></div>
+        <div class="kpi-card kpi-green glow-card"><div class="kpi-header"><span class="kpi-label">Concluídas/Mês</span><div class="kpi-icon">✅</div></div><div class="kpi-value num skeleton" style="width:60px;height:36px;border-radius:4px"></div><div class="kpi-sub skeleton" style="width:80px;height:12px;margin-top:8px;border-radius:4px"></div></div>
+        <div class="kpi-card kpi-purple glow-card"><div class="kpi-header"><span class="kpi-label">Taxa de Conclusão</span><div class="kpi-icon">📊</div></div><div style="display:flex;align-items:center;gap:12px"><div class="circular-progress"><svg width="52" height="52" viewBox="0 0 52 52"><circle class="bg-circle" cx="26" cy="26" r="22" fill="none" stroke-width="4"/><circle class="progress-circle" id="completion-circle" cx="26" cy="26" r="22" fill="none" stroke-width="4" stroke-dasharray="138.2" stroke-dashoffset="138.2"/></svg><div class="value-text" id="completion-pct">0%</div></div><div><div class="kpi-value num" id="kpi-rate-val" style="font-size:28px">—</div><div class="kpi-sub">taxa geral</div></div></div></div>
+        <div class="kpi-card kpi-gold glow-card admin-only"><div class="kpi-header"><span class="kpi-label">Horas no Mês</span><div class="kpi-icon">⏱️</div></div><div class="kpi-value num" id="kpi-hours">—</div><div class="kpi-sub">horas registradas</div></div>
+        <div class="kpi-card kpi-teal glow-card"><div class="kpi-header"><span class="kpi-label">Emails Pendentes</span><div class="kpi-icon">📧</div></div><div class="kpi-value num" id="kpi-pending-emails">—</div><div class="kpi-sub">aguardando revisão</div></div>
+      </div>
+
+      <div class="charts-row">
+        <div class="chart-card glow-card">
+          <div class="chart-title">Tarefas por Status</div>
+          <div class="chart-container" style="height:220px"><canvas id="chart-status"></canvas></div>
+        </div>
+        <div class="chart-card glow-card">
+          <div class="chart-title">Tarefas por Embarcação (Top 10)</div>
+          <div class="chart-container" style="height:220px"><canvas id="chart-vessels"></canvas></div>
+        </div>
+      </div>
+
+      <div class="table-card glow-card">
+        <div class="table-header">
+          <span class="table-title">Tarefas Ativas</span>
+          <button class="btn btn-ghost btn-sm" onclick="navigate('tasks')">Ver Todas →</button>
+        </div>
+        <div class="table-wrap">
+          <table id="dash-tasks-table">
+            <thead><tr><th>#</th><th>Tarefa</th><th>Embarcação</th><th>Categoria</th><th>Prioridade</th><th>Status</th><th>Prazo</th><th>Dias Rest.</th></tr></thead>
+            <tbody id="dash-tasks-body"><tr><td colspan="8" style="text-align:center;padding:40px;color:var(--color-text-muted)">Carregando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── TASKS PAGE ─── -->
+    <div id="page-tasks" class="page">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Tarefas</h1>
+          <p class="page-subtitle" id="tasks-count-label">Carregando...</p>
+        </div>
+        <button class="btn btn-gold" onclick="openTaskModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nova Tarefa
+        </button>
+      </div>
+
+      <div class="filters-bar">
+        <input type="text" class="filter-input filter-search" id="tasks-search" placeholder="🔍  Buscar tarefas..." oninput="debouncedFilterTasks()">
+        <select class="filter-input filter-select" id="tasks-filter-vessel" onchange="filterTasks()"><option value="">Todas Embarcações</option></select>
+        <select class="filter-input filter-select" id="tasks-filter-category" onchange="filterTasks()">
+          <option value="">Todas Categorias</option>
+          <option value="DP Annual Trials">DP Annual Trials</option>
+          <option value="FMEA">FMEA</option>
+          <option value="Vetting/OCIMF">Vetting/OCIMF</option>
+          <option value="Treinamento">Treinamento</option>
+          <option value="Procedimento">Procedimento</option>
+          <option value="Manual DP">Manual DP</option>
+          <option value="ASOG/CAMO">ASOG/CAMO</option>
+          <option value="Incidente DP">Incidente DP</option>
+          <option value="Avaliação Pessoal">Avaliação Pessoal</option>
+          <option value="BRO/Multa">BRO/Multa</option>
+          <option value="Auditoria">Auditoria</option>
+          <option value="Consulta Técnica">Consulta Técnica</option>
+          <option value="Documentação">Documentação</option>
+          <option value="Outro">Outro</option>
+        </select>
+        <select class="filter-input filter-select" id="tasks-filter-status" onchange="filterTasks()">
+          <option value="">Todos Status</option>
+          <option value="pendente">Pendente</option>
+          <option value="em_andamento">Em Andamento</option>
+          <option value="aguardando_cliente">Aguardando Cliente</option>
+          <option value="aguardando_aprovacao">Aguardando Aprovação</option>
+          <option value="concluida">Concluída</option>
+          <option value="cancelada">Cancelada</option>
+        </select>
+        <select class="filter-input filter-select" id="tasks-filter-priority" onchange="filterTasks()">
+          <option value="">Todas Prioridades</option>
+          <option value="critica">Crítica</option>
+          <option value="alta">Alta</option>
+          <option value="media">Média</option>
+          <option value="baixa">Baixa</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="clearTaskFilters()">Limpar</button>
+      </div>
+
+      <div class="table-card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th onclick="sortTasks('id')">ID</th>
+              <th onclick="sortTasks('title')">Tarefa</th>
+              <th onclick="sortTasks('vessel_name')">Embarcação</th>
+              <th onclick="sortTasks('category')">Categoria</th>
+              <th onclick="sortTasks('priority')">Prioridade</th>
+              <th onclick="sortTasks('status')">Status</th>
+              <th onclick="sortTasks('deadline')">Prazo</th>
+              <th onclick="sortTasks('days_remaining')">Dias Rest.</th>
+              <th>Fonte</th>
+              <th>Ações</th>
+            </tr></thead>
+            <tbody id="tasks-table-body"><tr><td colspan="10" style="text-align:center;padding:40px;color:var(--color-text-muted)">Carregando...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="tasks-pagination"></div>
+      </div>
+    </div>
+
+    <!-- ─── VESSELS PAGE ─── -->
+    <div id="page-vessels" class="page">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Embarcações</h1>
+          <p class="page-subtitle" id="vessels-count-label">Carregando...</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--color-text-muted);cursor:pointer">
+            <input type="checkbox" id="show-inactive-vessels" onchange="loadVessels()"> Mostrar Inativas
+          </label>
+          <button class="btn btn-gold admin-only" onclick="openVesselModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Adicionar
+          </button>
+        </div>
+      </div>
+      <div class="vessels-grid" id="vessels-grid">
+        <div style="color:var(--color-text-muted);grid-column:1/-1;text-align:center;padding:40px">Carregando...</div>
+      </div>
+    </div>
+
+    <!-- ─── EMAIL INBOX PAGE ─── -->
+    <div id="page-inbox" class="page">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Caixa de Entrada</h1>
+          <p class="page-subtitle" id="inbox-count-label">Emails recebidos para triagem</p>
+        </div>
+      </div>
+
+      <div class="filters-bar" style="margin-bottom:16px">
+        <button class="btn btn-sm" id="inbox-filter-pending" onclick="filterInbox('pending')" style="background:var(--color-accent);color:#0a0f1a">Pendentes</button>
+        <button class="btn btn-ghost btn-sm" id="inbox-filter-approved" onclick="filterInbox('approved')">Aprovados</button>
+        <button class="btn btn-ghost btn-sm" id="inbox-filter-rejected" onclick="filterInbox('rejected')">Rejeitados</button>
+        <button class="btn btn-ghost btn-sm" id="inbox-filter-all" onclick="filterInbox('')">Todos</button>
+      </div>
+
+      <div class="email-grid" id="email-grid">
+        <div style="color:var(--color-text-muted);text-align:center;padding:40px">Carregando emails...</div>
+      </div>
+    </div>
+
+    <!-- ─── TIME TRACKING PAGE ─── -->
+    <div id="page-time" class="page admin-only">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Registro de Horas</h1>
+          <p class="page-subtitle">Acompanhamento de horas trabalhadas</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <input type="month" class="filter-input" id="time-month-filter" onchange="loadTimeLogs()" style="padding:8px 12px">
+          <button class="btn btn-gold" onclick="openTimeLogModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Novo Registro
+          </button>
+        </div>
+      </div>
+
+      <div class="table-card glow-card" style="margin-bottom:24px;padding:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+          <div>
+            <div style="font-size:48px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--color-accent);line-height:1" id="timer-big">00:00:00</div>
+            <div style="font-size:13px;color:var(--color-text-muted);margin-top:4px" id="timer-status-label">Timer parado</div>
+          </div>
+          <div style="display:flex;gap:12px">
+            <button class="btn btn-success btn-lg" id="timer-start-btn" onclick="startTimer()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Iniciar
+            </button>
+            <button class="btn btn-danger btn-lg hidden" id="timer-stop-btn" onclick="stopTimer()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+              Parar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-summary">
+        <div class="time-hero glow-card">
+          <div class="time-hero-value num" id="time-total-hours">0.0h</div>
+          <div class="time-hero-label">Total no Mês</div>
+        </div>
+        <div class="chart-card glow-card">
+          <div class="chart-title">Distribuição Diária de Horas</div>
+          <div class="chart-container" style="height:140px"><canvas id="chart-time-daily"></canvas></div>
+        </div>
+      </div>
+
+      <div class="table-card glow-card" style="margin-bottom:24px">
+        <div class="table-header"><span class="table-title">Registros de Horas</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Início</th><th>Fim</th><th>Duração</th><th>Tarefa</th><th>Descrição</th><th class="admin-only">Ações</th></tr></thead>
+            <tbody id="timelogs-body"><tr><td colspan="7" style="text-align:center;padding:40px;color:var(--color-text-muted)">Carregando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── REPORTS PAGE ─── -->
+    <div id="page-reports" class="page">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Relatórios</h1>
+          <p class="page-subtitle">Geração e exportação de relatórios</p>
+        </div>
+      </div>
+
+      <div class="report-cards">
+        <div class="report-type-card selected glow-card" id="rcard-pendencias" onclick="selectReport('pendencias')"><div class="report-icon">📌</div><div class="report-name">Pendências</div><div class="report-desc">Tarefas abertas por embarcação</div></div>
+        <div class="report-type-card glow-card" id="rcard-concluidas" onclick="selectReport('concluidas')"><div class="report-icon">✅</div><div class="report-name">Concluídas</div><div class="report-desc">Tarefas concluídas no período</div></div>
+        <div class="report-type-card glow-card admin-only" id="rcard-horas" onclick="selectReport('horas')"><div class="report-icon">⏱️</div><div class="report-name">Horas</div><div class="report-desc">Registros mensais de horas</div></div>
+        <div class="report-type-card glow-card" id="rcard-categoria" onclick="selectReport('categoria')"><div class="report-icon">📊</div><div class="report-name">Por Categoria</div><div class="report-desc">Breakdown por categoria</div></div>
+      </div>
+
+      <div class="filters-bar" id="report-filters" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--color-text-muted)">De:</label>
+          <input type="date" class="filter-input" id="report-from" style="width:140px">
+          <label style="font-size:12px;color:var(--color-text-muted)">Até:</label>
+          <input type="date" class="filter-input" id="report-to" style="width:140px">
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="generateReport()">Gerar Relatório</button>
+          <button class="btn btn-ghost" onclick="printReport()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Imprimir
+          </button>
+        </div>
+      </div>
+
+      <div class="report-preview" id="report-preview-section">
+        <div class="report-preview-header"><span class="report-preview-title" id="report-preview-title">Selecione um relatório</span></div>
+        <div class="report-preview-body" id="report-preview-body">
+          <div class="empty-state"><div class="empty-icon">📄</div><div class="empty-title">Nenhum relatório gerado</div><div class="empty-sub">Selecione um tipo e clique em Gerar Relatório</div></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ─── AI PANEL ────────────────────────────────────────────────── -->
+<div class="ai-panel" id="ai-panel">
+  <div class="ai-panel-header">
+    <div class="ai-panel-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--color-accent)"><path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2z"/><path d="M12 16v-4M12 8h.01"/></svg>
+      Assistente IA
+      <span class="ai-badge">IA</span>
+    </div>
+    <button class="modal-close" onclick="toggleAIPanel()">✕</button>
+  </div>
+  <div class="ai-panel-body" id="ai-messages">
+    <div class="ai-message assistant">
+      <strong style="color:var(--color-text)">Assistente MB Maritime</strong><br><br>
+      Olá! Sou seu assistente especializado em Posicionamento Dinâmico. Posso ajudar com análise de tarefas, normas marítimas e muito mais.
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-muted);margin-bottom:8px">Prompts Rápidos</div>
+      <div class="ai-prompt-chips">
+        <button class="ai-chip" onclick="useAIPrompt('Resumo das tarefas pendentes')">📊 Resumo das tarefas pendentes</button>
+        <button class="ai-chip" onclick="useAIPrompt('Tarefas vencidas e priorização')">🚨 Tarefas vencidas e priorização</button>
+        <button class="ai-chip" onclick="useAIPrompt('Status das embarcações')">🚢 Status das embarcações</button>
+      </div>
+    </div>
+  </div>
+  <div class="ai-panel-footer">
+    <div class="ai-input-row">
+      <input type="text" class="ai-input" id="ai-input" placeholder="Mensagem..." onkeydown="if(event.key==='Enter')sendAIMessage()">
+      <button class="btn btn-gold btn-sm ai-btn-icon" onclick="sendAIMessage()" title="Enviar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODALS ───────────────────────────────────────────────────── -->
+
+<!-- Task Modal -->
+<div class="modal-overlay" id="task-modal" onclick="closeModalOnOverlay(event,'task-modal')">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2 class="modal-title" id="task-modal-title">Nova Tarefa</h2>
+      <button class="modal-close" onclick="closeModal('task-modal')">✕</button>
+    </div>
+    <form id="task-form" onsubmit="saveTask(event)">
+      <input type="hidden" id="task-edit-id">
+      <div class="form-grid">
+        <div class="form-group full"><label>Título *</label><input type="text" id="task-title" placeholder="Título da tarefa" required></div>
+        <div class="form-group full"><label>Descrição</label><textarea id="task-description" placeholder="Descreva a tarefa em detalhes..."></textarea></div>
+        <div class="form-group"><label>Embarcação</label><select id="task-vessel"><option value="">-- Selecionar --</option></select></div>
+        <div class="form-group"><label>Categoria</label><select id="task-category">
+          <option value="">-- Selecionar --</option>
+          <option>DP Annual Trials</option><option>FMEA</option><option>Vetting/OCIMF</option>
+          <option>Treinamento</option><option>Procedimento</option><option>Manual DP</option>
+          <option>ASOG/CAMO</option><option>Incidente DP</option><option>Avaliação Pessoal</option>
+          <option>BRO/Multa</option><option>Auditoria</option><option>Consulta Técnica</option>
+          <option>Documentação</option><option>Outro</option>
+        </select></div>
+        <div class="form-group"><label>Prioridade</label><select id="task-priority">
+          <option value="baixa">Baixa</option><option value="media" selected>Média</option>
+          <option value="alta">Alta</option><option value="critica">Crítica</option>
+        </select></div>
+        <div class="form-group"><label>Status</label><select id="task-status">
+          <option value="pendente">Pendente</option><option value="em_andamento">Em Andamento</option>
+          <option value="aguardando_cliente">Aguardando Cliente</option><option value="aguardando_aprovacao">Aguardando Aprovação</option>
+          <option value="concluida">Concluída</option><option value="cancelada">Cancelada</option>
+        </select></div>
+        <div class="form-group"><label>Solicitado por</label><input type="text" id="task-requested-by" placeholder="Nome do solicitante"></div>
+        <div class="form-group"><label>Prazo</label><input type="date" id="task-deadline"></div>
+        <div class="form-group full"><label>Observações</label><textarea id="task-notes" placeholder="Informações adicionais..."></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('task-modal')">Cancelar</button>
+        <button type="submit" class="btn btn-gold" id="task-save-btn">Salvar Tarefa</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Task Detail Modal -->
+<div class="modal-overlay" id="task-detail-modal" onclick="closeModalOnOverlay(event,'task-detail-modal')">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2 class="modal-title">Detalhes da Tarefa</h2>
+      <button class="modal-close" onclick="closeModal('task-detail-modal')">✕</button>
+    </div>
+    <div id="task-detail-body">Carregando...</div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('task-detail-modal')">Fechar</button>
+      <button class="btn btn-ghost btn-sm admin-only" id="detail-renew-btn" onclick="openRenewModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.46"/></svg>
+        Renovar Prazo
+      </button>
+      <button class="btn btn-gold admin-only" id="detail-edit-btn" onclick="editTaskFromDetail()">Editar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Renew Deadline Modal -->
+<div class="modal-overlay" id="renew-modal" onclick="closeModalOnOverlay(event,'renew-modal')">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title">Renovar Prazo</h2>
+      <button class="modal-close" onclick="closeModal('renew-modal')">✕</button>
+    </div>
+    <div class="form-group"><label>Novo Prazo *</label><input type="date" id="renew-deadline" style="width:100%;padding:var(--sp-3) var(--sp-4);background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:var(--radius-md)"></div>
+    <div class="form-group" style="margin-top:12px"><label>Motivo da Renovação *</label><textarea id="renew-reason" style="width:100%;min-height:80px;padding:var(--sp-3) var(--sp-4);background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:var(--radius-md)" placeholder="Descreva o motivo..."></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('renew-modal')">Cancelar</button>
+      <button class="btn btn-gold" onclick="saveRenewal()">Confirmar Renovação</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vessel Modal -->
+<div class="modal-overlay" id="vessel-modal" onclick="closeModalOnOverlay(event,'vessel-modal')">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title" id="vessel-modal-title">Adicionar Embarcação</h2>
+      <button class="modal-close" onclick="closeModal('vessel-modal')">✕</button>
+    </div>
+    <form id="vessel-form" onsubmit="saveVessel(event)">
+      <input type="hidden" id="vessel-edit-id">
+      <div class="form-group"><label>Número</label><input type="number" id="vessel-num" placeholder="Número"></div>
+      <div class="form-group" style="margin-top:12px"><label>Nome *</label><input type="text" id="vessel-name-input" placeholder="Nome da embarcação" required></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('vessel-modal')">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Time Log Modal -->
+<div class="modal-overlay" id="timelog-modal" onclick="closeModalOnOverlay(event,'timelog-modal')">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title">Novo Registro de Horas</h2>
+      <button class="modal-close" onclick="closeModal('timelog-modal')">✕</button>
+    </div>
+    <form id="timelog-form" onsubmit="saveTimeLog(event)">
+      <div class="form-group"><label>Data *</label><input type="date" id="tl-date" required></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div class="form-group"><label>Início *</label><input type="time" id="tl-start" required></div>
+        <div class="form-group"><label>Fim *</label><input type="time" id="tl-end" required></div>
+      </div>
+      <div class="form-group" style="margin-top:12px"><label>Tarefa (opcional)</label><select id="tl-task"><option value="">-- Nenhuma --</option></select></div>
+      <div class="form-group" style="margin-top:12px"><label>Descrição</label><textarea id="tl-description" placeholder="O que foi feito..." style="min-height:60px"></textarea></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('timelog-modal')">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Salvar Registro</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Email Approve/Edit Modal -->
+<div class="modal-overlay" id="email-approve-modal" onclick="closeModalOnOverlay(event,'email-approve-modal')">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2 class="modal-title" id="email-approve-title">Aprovar como Tarefa</h2>
+      <button class="modal-close" onclick="closeModal('email-approve-modal')">✕</button>
+    </div>
+    <form id="email-approve-form" onsubmit="approveEmailAsTask(event)">
+      <input type="hidden" id="ea-email-id">
+      <div class="form-grid">
+        <div class="form-group full"><label>Título *</label><input type="text" id="ea-title" required></div>
+        <div class="form-group full"><label>Descrição</label><textarea id="ea-description"></textarea></div>
+        <div class="form-group"><label>Embarcação</label><select id="ea-vessel"><option value="">-- Selecionar --</option></select></div>
+        <div class="form-group"><label>Categoria</label><select id="ea-category">
+          <option value="">-- Selecionar --</option>
+          <option>DP Annual Trials</option><option>FMEA</option><option>Vetting/OCIMF</option>
+          <option>Treinamento</option><option>Procedimento</option><option>Manual DP</option>
+          <option>ASOG/CAMO</option><option>Incidente DP</option><option>Avaliação Pessoal</option>
+          <option>BRO/Multa</option><option>Auditoria</option><option>Consulta Técnica</option>
+          <option>Documentação</option><option>Outro</option>
+        </select></div>
+        <div class="form-group"><label>Prioridade</label><select id="ea-priority">
+          <option value="baixa">Baixa</option><option value="media" selected>Média</option>
+          <option value="alta">Alta</option><option value="critica">Crítica</option>
+        </select></div>
+        <div class="form-group"><label>Prazo</label><input type="date" id="ea-deadline"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('email-approve-modal')">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Criar Tarefa</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="confirm-modal" onclick="closeModalOnOverlay(event,'confirm-modal')">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title" id="confirm-title">Confirmar</h2>
+      <button class="modal-close" onclick="closeModal('confirm-modal')">✕</button>
+    </div>
+    <p id="confirm-message" style="color:var(--color-text-muted);font-size:14px">Tem certeza?</p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('confirm-modal')">Cancelar</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Supabase JS v2 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./app.js"></script>
+<script>
+// Fallback: if app.js DOMContentLoaded failed, this ensures login works
+window.addEventListener('load', function() {
+  var btn = document.getElementById('login-btn');
+  if (!btn) return;
+  // If __doLogin was never set, app.js init failed — create minimal login
+  if (!window.__doLogin) {
+    var errEl = document.getElementById('login-error');
+    var SB_URL = 'https://cboagvwdowlqupccgkng.supabase.co';
+    var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNib2Fndndkb3dscXVwY2Nna25nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0OTQyOTEsImV4cCI6MjA4ODA3MDI5MX0.F9awl_j80GqaY2oufp_-bN_6nlVcFxzZXPv3WNr_2-s';
+    var sb = null;
+    try {
+      if (window.supabase && window.supabase.createClient) {
+        sb = window.supabase.createClient(SB_URL, SB_KEY);
+      }
+    } catch(e) {}
+    
+    window.__doLogin = async function() {
+      var email = document.getElementById('login-email').value.trim();
+      var pass = document.getElementById('login-pass').value;
+      if (!email || !pass) { if(errEl){errEl.textContent='Preencha email e senha';errEl.classList.add('visible');} return; }
+      if (!sb) { if(errEl){errEl.textContent='Erro de sistema. Recarregue (F5).';errEl.classList.add('visible');} return; }
+      btn.disabled = true; btn.textContent = 'Entrando...';
+      if(errEl) errEl.classList.remove('visible');
+      try {
+        var result = await sb.auth.signInWithPassword({email:email, password:pass});
+        if (result.error) {
+          if(errEl){errEl.textContent=result.error.message==='Invalid login credentials'?'Email ou senha incorretos':result.error.message;errEl.classList.add('visible');}
+        } else if (result.data && result.data.session) {
+          document.getElementById('login-screen').style.display='none';
+          document.getElementById('dashboard-app').classList.add('visible');
+          // Try to init dashboard
+          try { if(typeof initDashboard==='function'){state.user=result.data.session.user;await loadOrCreateProfile();await initDashboard();} } catch(e){}
+        }
+      } catch(e) { if(errEl){errEl.textContent='Erro: '+e.message;errEl.classList.add('visible');} }
+      btn.disabled = false;
+      btn.innerHTML = 'Entrar <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+    };
+  }
+});
+</script>
+</body>
+</html>
