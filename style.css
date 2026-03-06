@@ -280,6 +280,26 @@ a { color: inherit; text-decoration: none; }
   background: rgba(255,255,255,0.12);
 }
 
+.pass-toggle-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity var(--dur);
+}
+.pass-toggle-btn:hover {
+  opacity: 1;
+}
+
 .login-submit-btn {
   width: 100%;
   display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -1268,4 +1288,91 @@ tbody td.truncate-cell { max-width: 200px; overflow: hidden; text-overflow: elli
 /* Mobile sidebar AI item at bottom */
 @media (max-width: 768px) {
   .sidebar > div[style*="margin-top:auto"] { display: none; }
+}
+
+/* Spin animation for loading icons */
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin-icon { animation: spin 1s linear infinite; }
+
+/* ─── TOGGLE SWITCH ──────────────────────────────────────────── */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--color-surface-3);
+  border-radius: var(--radius-full);
+  transition: background var(--dur) var(--ease);
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--color-accent-dim);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: var(--color-accent);
+}
+
+/* ─── SETTINGS PAGE ──────────────────────────────────────────── */
+#page-settings .glow-card h3 {
+  margin: 0 0 16px;
+  color: var(--color-accent);
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#page-settings .glow-card label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: block;
+  margin-bottom: 4px;
+}
+#page-settings .blocked-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+#page-settings .blocked-item .remove-blocked {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  opacity: 0.7;
+  transition: opacity var(--dur);
+}
+#page-settings .blocked-item .remove-blocked:hover {
+  opacity: 1;
+}
+@media (max-width: 768px) {
+  #page-settings > div > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
 }

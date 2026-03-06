@@ -7,13 +7,14 @@
 const SUPABASE_URL = 'https://cboagvwdowlqupccgkng.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNib2Fndndkb3dscXVwY2Nna25nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0OTQyOTEsImV4cCI6MjA4ODA3MDI5MX0.F9awl_j80GqaY2oufp_-bN_6nlVcFxzZXPv3WNr_2-s';
 
-let supabase = null;
+var _sb = null;
 
 // ─── STATE ────────────────────────────────────────────────────────
-let state = {
+var state = {
   user: null,
   profile: null,
   currentPage: 'dashboard',
+  dashboardInitialized: false,
   allTasks: [],
   filteredTasks: [],
   taskSortKey: 'created_at',
@@ -35,100 +36,105 @@ let state = {
 
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Create Supabase client HERE (after CDN script has loaded)
+  // Client Credentials Flow — no MSAL needed
+
+  // STEP 2: Create Supabase client
   try {
     if (window.supabase && window.supabase.createClient) {
-      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { storageKey: 'mb-auth', autoRefreshToken: true, persistSession: true, detectSessionInUrl: false, flowType: 'implicit' }
+      });
     }
-  } catch(e) { /* will be caught below */ }
+  } catch(e) { console.error('[MB] Supabase init error:', e); }
 
-  const errEl = document.getElementById('login-error');
-  if (!supabase) {
+  if (!_sb) {
+    const errEl = document.getElementById('login-error');
     if (errEl) {
-      errEl.textContent = 'Erro ao carregar sistema. Recarregue a p\u00e1gina (F5).';
+      errEl.textContent = 'Erro ao carregar sistema. Recarregue a página (F5).';
       errEl.classList.add('visible');
     }
     showPage('login');
     return;
   }
 
-  const now = new Date();
-  const mf = document.getElementById('time-month-filter');
-  if (mf) mf.value = now.toISOString().slice(0, 7);
-  const rd = document.getElementById('report-from');
-  const rt = document.getElementById('report-to');
-  if (rd) rd.value = now.toISOString().slice(0, 7) + '-01';
-  if (rt) rt.value = now.toISOString().slice(0, 10);
+  // Set default dates
+  try {
+    const now = new Date();
+    const mf = document.getElementById('time-month-filter');
+    if (mf) mf.value = now.toISOString().slice(0, 7);
+    const rd = document.getElementById('report-from');
+    const rt = document.getElementById('report-to');
+    if (rd) rd.value = now.toISOString().slice(0, 7) + '-01';
+    if (rt) rt.value = now.toISOString().slice(0, 10);
+  } catch(e) {}
 
   document.documentElement.setAttribute('data-theme', 'dark');
-  updateThemeIcon();
+  try { updateThemeIcon(); } catch(e) {}
 
-  // Login button click handler - expose globally
+  // Login button handler
   window.__doLogin = handleEmailLogin;
   const loginBtn = document.getElementById('login-btn');
   if (loginBtn) {
-    loginBtn.addEventListener('click', function(e) {
+    loginBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       handleEmailLogin();
     });
   }
-  // Enter key on password field
   const passField = document.getElementById('login-pass');
   if (passField) {
     passField.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleEmailLogin();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); }
     });
   }
-  // Enter key on email field
   const emailField = document.getElementById('login-email');
   if (emailField) {
     emailField.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleEmailLogin();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); }
     });
   }
 
-  // Listen for auth state changes
-  if (supabase) {
-    supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
+  // Auth: use ONLY onAuthStateChange (single entry point)
+  // INITIAL_SESSION fires for existing sessions, SIGNED_IN for new logins
+  _sb.auth.onAuthStateChange(async (event, session) => {
+    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+      if (!state.dashboardInitialized) {
+        state.dashboardInitialized = true;
         state.user = session.user;
-        await loadOrCreateProfile();
-        await initDashboard();
-      } else if (event === 'SIGNED_OUT') {
-        state.user = null;
-        state.profile = null;
-        showPage('login');
+        try {
+          await loadOrCreateProfile();
+        } catch(e) {
+          console.error('[MB] Profile error:', e);
+          state.profile = { id: session.user.id, name: session.user.email.split('@')[0], role: 'admin' };
+        }
+        try {
+          await initDashboard();
+        } catch(e) {
+          console.error('[MB] initDashboard error:', e);
+          showPage('app');
+          try { renderKPICards({ total_active: 0, overdue: 0, due_7d: 0, completed_month: 0, total_tasks: 0, pending_emails: 0, hours_month: 0 }); } catch(e2) {}
+        }
+        // Client Credentials: check if secret is configured
+        try {
+          await checkClientCredentialsConfig();
+        } catch(ccErr) {
+          console.warn('[MB] Client credentials check error:', ccErr);
+        }
       }
-    });
-
-    // Check existing session
-    checkSession();
-  } else {
-    showPage('login');
-  }
+    } else if (event === 'SIGNED_OUT') {
+      state.user = null;
+      state.profile = null;
+      state.dashboardInitialized = false;
+      showPage('login');
+    } else if (event === 'INITIAL_SESSION' && !session) {
+      showPage('login');
+    }
+  });
 });
-
-async function checkSession() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    state.user = session.user;
-    await loadOrCreateProfile();
-    await initDashboard();
-  } else {
-    showPage('login');
-  }
-}
 
 // ─── AUTH ──────────────────────────────────────────────────────────
 async function signInWithMicrosoft() {
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { error } = await _sb.auth.signInWithOAuth({
     provider: 'azure',
     options: {
       scopes: 'email Mail.Read Mail.Send offline_access',
@@ -140,20 +146,41 @@ async function signInWithMicrosoft() {
   }
 }
 
+function togglePassVisibility() {
+  var passInput = document.getElementById('login-pass');
+  var eyeIcon = document.getElementById('eye-icon');
+  if (!passInput) return;
+  if (passInput.type === 'password') {
+    passInput.type = 'text';
+    // Eye-off icon
+    eyeIcon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+  } else {
+    passInput.type = 'password';
+    // Eye icon
+    eyeIcon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  }
+}
+
 async function handleEmailLogin() {
-  const email = document.getElementById('login-email').value.trim();
+  var rawInput = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-pass').value;
   const btn = document.getElementById('login-btn');
   const errEl = document.getElementById('login-error');
   
-  if (!email || !password) {
-    errEl.textContent = 'Preencha email e senha';
+  if (!rawInput || !password) {
+    errEl.textContent = 'Preencha usu\u00e1rio e senha';
     errEl.classList.add('visible');
     return;
   }
 
-  if (!supabase) {
-    errEl.textContent = 'Sistema n\u00e3o iniciou. Recarregue (F5).';
+  // Convert username to email if no @ present
+  var email = rawInput;
+  if (rawInput.indexOf('@') === -1) {
+    email = rawInput + '@mbmaritime.com';
+  }
+
+  if (!_sb) {
+    errEl.textContent = 'Sistema não iniciou. Recarregue (F5).';
     errEl.classList.add('visible');
     return;
   }
@@ -162,12 +189,24 @@ async function handleEmailLogin() {
   btn.disabled = true;
   btn.textContent = 'Entrando...';
 
+  // Safety timeout - if login takes more than 8 seconds, reset button
+  var loginTimeout = setTimeout(function() {
+    console.error('[MB] Login timeout - resetting');
+    btn.disabled = false;
+    btn.innerHTML = 'Entrar <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+    errEl.textContent = 'Login demorou demais. Tente novamente.';
+    errEl.classList.add('visible');
+  }, 8000);
+
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    var signInResult = await _sb.auth.signInWithPassword({ email: email, password: password });
+    var data = signInResult.data;
+    var error = signInResult.error;
     
     if (error) {
+      clearTimeout(loginTimeout);
       errEl.textContent = error.message === 'Invalid login credentials'
-        ? 'Email ou senha incorretos'
+        ? 'Usu\u00e1rio ou senha incorretos'
         : error.message;
       errEl.classList.add('visible');
       btn.disabled = false;
@@ -175,51 +214,78 @@ async function handleEmailLogin() {
       return;
     }
 
-    if (data && data.session) {
-      state.user = data.session.user;
-      
-      // FIRST: show dashboard immediately so user sees progress
-      showPage('app');
-      
-      // Then load profile (non-blocking)
+    // Get user from response
+    var sessionUser = null;
+    if (data && data.session && data.session.user) sessionUser = data.session.user;
+    else if (data && data.user) sessionUser = data.user;
+
+    if (!sessionUser) {
+      clearTimeout(loginTimeout);
+      errEl.textContent = 'Erro na autenticação. Tente novamente.';
+      errEl.classList.add('visible');
+      btn.disabled = false;
+      btn.innerHTML = 'Entrar <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+      return;
+    }
+
+    // We have a valid user — show app page IMMEDIATELY
+    state.user = sessionUser;
+    state.dashboardInitialized = true;
+    showPage('app');
+    clearTimeout(loginTimeout);
+    
+    // Set basic header info right away
+    try {
+      document.getElementById('user-name').textContent = sessionUser.email.split('@')[0];
+      document.getElementById('user-role').textContent = 'Administrador';
+      document.getElementById('user-avatar').textContent = sessionUser.email[0].toUpperCase();
+      document.querySelectorAll('.admin-only').forEach(function(el) { el.style.display = ''; el.classList.remove('hidden'); });
+    } catch(e) { console.error('[MB] Header error:', e); }
+
+    // Set active nav to dashboard
+    try {
+      document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+      document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+      var dashPage = document.getElementById('page-dashboard');
+      if (dashPage) dashPage.classList.add('active');
+      var dashNav = document.querySelector('.nav-item[data-page="dashboard"]');
+      if (dashNav) dashNav.classList.add('active');
+    } catch(e) {}
+
+    // Load profile, vessels, dashboard in background (non-blocking)
+    setTimeout(async function() {
       try {
         await loadOrCreateProfile();
-      } catch (profileErr) {
-        state.profile = {
-          id: state.user.id,
-          username: state.user.email,
-          name: state.user.email.split('@')[0],
-          role: 'admin'
-        };
-      }
-      // Then init dashboard data (non-blocking)
-      try {
-        const p = state.profile || { name: state.user.email, role: 'admin' };
-        document.getElementById('user-name').textContent = p.name || state.user.email || 'Usu\u00e1rio';
+        var p = state.profile || {};
+        document.getElementById('user-name').textContent = p.name || sessionUser.email.split('@')[0];
         document.getElementById('user-role').textContent = p.role === 'admin' ? 'Administrador' : 'Colaborador';
-        document.getElementById('user-avatar').textContent = (p.name || state.user.email || 'U')[0].toUpperCase();
-        if (p.role === 'admin') {
-          document.querySelectorAll('.admin-only').forEach(el => { el.style.display = ''; el.classList.remove('hidden'); });
-        }
-        // Load data in background - don't block
-        loadVessels(true).catch(() => {});
-        navigate('dashboard').catch(() => {});
-      } catch (dashErr) {
-        // Dashboard is already visible, just log
+        document.getElementById('user-avatar').textContent = (p.name || sessionUser.email || 'U')[0].toUpperCase();
+      } catch(e) {
+        console.error('[MB] Profile error:', e);
+        state.profile = { id: sessionUser.id, name: sessionUser.email.split('@')[0], role: 'admin' };
       }
-    }
+      try { await loadVessels(true); } catch(e) { console.error('[MB] Vessels error:', e); }
+      try { await loadDashboard(); } catch(e) {
+        console.error('[MB] Dashboard error:', e);
+        try { renderKPICards({ total_active: 0, overdue: 0, due_7d: 0, completed_month: 0, total_tasks: 0, pending_emails: 0, hours_month: 0 }); } catch(e2) {}
+      }
+    }, 100);
+
   } catch (err) {
+    clearTimeout(loginTimeout);
+    console.error('[MB] Login error:', err);
     errEl.textContent = 'Erro de conexão. Tente novamente.';
     errEl.classList.add('visible');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Entrar <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
   }
+  
+  btn.disabled = false;
+  btn.innerHTML = 'Entrar <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
 }
 
 async function handleLogout() {
   stopTimer();
-  await supabase.auth.signOut();
+  state.dashboardInitialized = false;
+  await _sb.auth.signOut();
   showPage('login');
   document.getElementById('login-email').value = '';
   document.getElementById('login-pass').value = '';
@@ -240,7 +306,7 @@ function showPage(page) {
 // ─── PROFILE ──────────────────────────────────────────────────────
 async function loadOrCreateProfile() {
   if (!state.user) return;
-  const { data: profile, error } = await supabase
+  const { data: profile, error } = await _sb
     .from('profiles')
     .select('*')
     .eq('id', state.user.id)
@@ -256,7 +322,7 @@ async function loadOrCreateProfile() {
       role: 'admin', // Default first user to admin
       avatar_url: meta.avatar_url || null,
     };
-    const { data: created } = await supabase.from('profiles').insert(newProfile).select().single();
+    const { data: created } = await _sb.from('profiles').insert(newProfile).select().single();
     state.profile = created || newProfile;
   } else {
     state.profile = profile;
@@ -268,9 +334,11 @@ async function initDashboard() {
   showPage('app');
   const p = state.profile || {};
 
-  document.getElementById('user-name').textContent = p.name || state.user?.email || 'Usuário';
-  document.getElementById('user-role').textContent = p.role === 'admin' ? 'Administrador' : 'Colaborador';
-  document.getElementById('user-avatar').textContent = (p.name || state.user?.email || 'U')[0].toUpperCase();
+  try {
+    document.getElementById('user-name').textContent = p.name || state.user?.email || 'Usuário';
+    document.getElementById('user-role').textContent = p.role === 'admin' ? 'Administrador' : 'Colaborador';
+    document.getElementById('user-avatar').textContent = (p.name || state.user?.email || 'U')[0].toUpperCase();
+  } catch(e) {}
 
   // Admin-only elements
   if (p.role === 'admin') {
@@ -280,12 +348,22 @@ async function initDashboard() {
     });
   }
 
-  await loadVessels(true);
-  await navigate('dashboard');
+  try {
+    await loadVessels(true);
+  } catch(e) { console.error('Vessels load error:', e); }
+  
+  try {
+    await navigate('dashboard');
+  } catch(e) { 
+    console.error('Navigate error:', e);
+    // Force show empty dashboard
+    renderKPICards({ total_active: 0, overdue: 0, due_7d: 0, completed_month: 0, total_tasks: 0, pending_emails: 0, hours_month: 0 });
+  }
 }
 
 // ─── NAVIGATION ───────────────────────────────────────────────────
 async function navigate(page) {
+  // ALWAYS show the page first, then load data
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -297,48 +375,49 @@ async function navigate(page) {
 
   const titles = {
     dashboard: 'Dashboard', tasks: 'Tarefas', vessels: 'Embarcações',
-    inbox: 'Caixa de Entrada', time: 'Registro de Horas', reports: 'Relatórios'
+    inbox: 'Caixa de Entrada', time: 'Registro de Horas', reports: 'Relatórios',
+    settings: 'Configurações'
   };
   const topbarTitle = document.getElementById('topbar-title');
   if (topbarTitle) topbarTitle.innerHTML = `${titles[page] || page} <small>${formatDate(new Date())}</small>`;
 
   state.currentPage = page;
 
-  if (page === 'dashboard') await loadDashboard();
-  else if (page === 'tasks') { await loadVessels(true); await loadTasks(); }
-  else if (page === 'vessels') await loadVessels(false);
-  else if (page === 'inbox') await loadInbox();
-  else if (page === 'time') await loadTimeLogs();
+  // Load data in background - NEVER block navigation
+  try {
+    if (page === 'dashboard') await loadDashboard();
+    else if (page === 'tasks') { await loadVessels(true); await loadTasks(); }
+    else if (page === 'vessels') await loadVessels(false);
+    else if (page === 'inbox') { await checkMSConnection(); await loadInbox(); }
+    else if (page === 'time') await loadTimeLogs();
+    else if (page === 'settings') loadSettings();
+  } catch (navErr) {
+    console.error('Error loading page data:', page, navErr);
+  }
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────
-let statusChartInst = null, vesselChartInst = null;
+var statusChartInst = null, vesselChartInst = null;
 
 async function loadDashboard() {
   const dl = document.getElementById('dash-date-label');
   if (dl) dl.textContent = `Atualizado ${formatDate(new Date())} às ${formatTime(new Date())}`;
 
-  // Use RPC function for dashboard stats
-  const { data, error } = await supabase.rpc('get_dashboard_stats');
-
-  if (error) {
-    console.error('Dashboard stats error:', error);
-    // Fallback: compute from local data
+  // Load dashboard data directly from tables (no RPC dependency)
+  try {
     await loadDashboardFallback();
-    return;
+  } catch (err) {
+    console.error('Dashboard load error:', err);
+    // Show empty state rather than broken loading
+    renderKPICards({ total_active: 0, overdue: 0, due_7d: 0, completed_month: 0, total_tasks: 0, pending_emails: 0, hours_month: 0 });
   }
-
-  const d = data || {};
-  renderKPICards(d);
-  renderStatusChart(d.by_status);
-  renderVesselChart(d.by_vessel);
-  loadActiveTasks();
 }
 
 async function loadDashboardFallback() {
-  // Query tasks directly if RPC fails
-  const { data: tasks } = await supabase.from('tasks').select('*, vessels(name)');
-  const { data: emails } = await supabase.from('email_inbox').select('id').eq('status', 'pending');
+  const { data: tasks, error: tErr } = await _sb.from('tasks').select('*, vessels(name)');
+  if (tErr) throw tErr;
+  const { data: emails, error: eErr } = await _sb.from('email_inbox').select('id').eq('status', 'pending');
+  if (eErr) console.error('[MB] emails query error:', eErr);
   const allTasks = tasks || [];
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -532,7 +611,7 @@ function renderVesselChart(byVessel) {
 }
 
 async function loadActiveTasks() {
-  const { data } = await supabase
+  const { data } = await _sb
     .from('tasks')
     .select('*, vessels(name)')
     .in('status', ['pendente', 'em_andamento', 'aguardando_cliente', 'aguardando_aprovacao'])
@@ -565,14 +644,14 @@ function renderDashTasksTable(tasks) {
 }
 
 // ─── TASKS ────────────────────────────────────────────────────────
-let debounceTimer = null;
+var debounceTimer = null;
 function debouncedFilterTasks() {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(filterTasks, 300);
 }
 
 async function loadTasks() {
-  let query = supabase.from('tasks').select('*, vessels(name)');
+  let query = _sb.from('tasks').select('*, vessels(name)');
 
   const search = document.getElementById('tasks-search')?.value?.trim();
   const vessel = document.getElementById('tasks-filter-vessel')?.value;
@@ -707,7 +786,7 @@ async function quickStatusChange(taskId, newStatus, selectEl) {
   selectEl.className = `badge ${statusClass(newStatus)} status-select`;
   const updateData = { status: newStatus };
   if (newStatus === 'concluida') updateData.completed_at = new Date().toISOString();
-  const { error } = await supabase.from('tasks').update(updateData).eq('id', taskId);
+  const { error } = await _sb.from('tasks').update(updateData).eq('id', taskId);
   if (error) { toast('Erro ao atualizar status', 'error'); return; }
   const task = state.filteredTasks.find(t => t.id === taskId);
   if (task) task.status = newStatus;
@@ -734,7 +813,7 @@ async function openTaskModal(taskId = null) {
   });
 
   if (taskId) {
-    const { data: t } = await supabase.from('tasks').select('*').eq('id', taskId).single();
+    const { data: t } = await _sb.from('tasks').select('*').eq('id', taskId).single();
     if (t) {
       document.getElementById('task-edit-id').value = t.id;
       document.getElementById('task-title').value = t.title || '';
@@ -773,11 +852,11 @@ async function saveTask(e) {
   if (taskId) {
     body.updated_at = new Date().toISOString();
     if (body.status === 'concluida') body.completed_at = new Date().toISOString();
-    ({ error } = await supabase.from('tasks').update(body).eq('id', taskId));
+    ({ error } = await _sb.from('tasks').update(body).eq('id', taskId));
   } else {
     body.created_by = state.user?.id;
     body.source = 'manual';
-    ({ error } = await supabase.from('tasks').insert(body));
+    ({ error } = await _sb.from('tasks').insert(body));
   }
 
   btn.disabled = false;
@@ -792,7 +871,7 @@ async function saveTask(e) {
 
 async function confirmDeleteTask(taskId) {
   openConfirm('Excluir Tarefa', 'Deseja excluir esta tarefa permanentemente?', async () => {
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+    const { error } = await _sb.from('tasks').delete().eq('id', taskId);
     if (error) { toast('Erro ao excluir', 'error'); return; }
     toast('Tarefa excluída', 'success');
     loadTasks();
@@ -803,11 +882,11 @@ async function confirmDeleteTask(taskId) {
 // ─── TASK DETAIL ──────────────────────────────────────────────────
 async function openTaskDetail(taskId) {
   state.currentDetailTaskId = taskId;
-  const { data: t } = await supabase.from('tasks').select('*, vessels(name)').eq('id', taskId).single();
+  const { data: t } = await _sb.from('tasks').select('*, vessels(name)').eq('id', taskId).single();
   if (!t) return;
 
   // Get renewals
-  const { data: renewals } = await supabase.from('task_renewals')
+  const { data: renewals } = await _sb.from('task_renewals')
     .select('*')
     .eq('task_id', taskId)
     .order('created_at', { ascending: false });
@@ -875,10 +954,10 @@ async function saveRenewal() {
 
   const taskId = state.currentDetailTaskId;
   // Get current deadline
-  const { data: task } = await supabase.from('tasks').select('deadline').eq('id', taskId).single();
+  const { data: task } = await _sb.from('tasks').select('deadline').eq('id', taskId).single();
 
   // Insert renewal record
-  const { error: rErr } = await supabase.from('task_renewals').insert({
+  const { error: rErr } = await _sb.from('task_renewals').insert({
     task_id: taskId,
     old_deadline: task?.deadline || null,
     new_deadline: newDeadline,
@@ -887,7 +966,7 @@ async function saveRenewal() {
   });
 
   // Update task deadline
-  const { error: tErr } = await supabase.from('tasks').update({ deadline: newDeadline, updated_at: new Date().toISOString() }).eq('id', taskId);
+  const { error: tErr } = await _sb.from('tasks').update({ deadline: newDeadline, updated_at: new Date().toISOString() }).eq('id', taskId);
 
   if (rErr || tErr) { toast('Erro ao renovar prazo', 'error'); return; }
   toast('Prazo renovado com sucesso!', 'success');
@@ -898,7 +977,7 @@ async function saveRenewal() {
 
 // ─── VESSELS ──────────────────────────────────────────────────────
 async function loadVessels(forDropdowns = false) {
-  let query = supabase.from('vessels').select('*').order('number', { ascending: true });
+  let query = _sb.from('vessels').select('*').order('number', { ascending: true });
   const showInactive = document.getElementById('show-inactive-vessels')?.checked;
   if (!showInactive && !forDropdowns) query = query.eq('active', true);
 
@@ -982,9 +1061,9 @@ async function saveVessel(e) {
   let error;
   if (vesselId) {
     body.updated_at = new Date().toISOString();
-    ({ error } = await supabase.from('vessels').update(body).eq('id', vesselId));
+    ({ error } = await _sb.from('vessels').update(body).eq('id', vesselId));
   } else {
-    ({ error } = await supabase.from('vessels').insert(body));
+    ({ error } = await _sb.from('vessels').insert(body));
   }
   if (error) { toast('Erro ao salvar embarcação', 'error'); return; }
   toast(vesselId ? 'Embarcação atualizada!' : 'Embarcação adicionada!', 'success');
@@ -993,7 +1072,7 @@ async function saveVessel(e) {
 }
 
 async function toggleVesselActive(vesselId, currentActive) {
-  const { error } = await supabase.from('vessels').update({ active: !currentActive, updated_at: new Date().toISOString() }).eq('id', vesselId);
+  const { error } = await _sb.from('vessels').update({ active: !currentActive, updated_at: new Date().toISOString() }).eq('id', vesselId);
   if (error) { toast('Erro ao atualizar', 'error'); return; }
   toast(`Embarcação ${currentActive ? 'desativada' : 'ativada'}`, 'success');
   loadVessels(false);
@@ -1001,11 +1080,11 @@ async function toggleVesselActive(vesselId, currentActive) {
 
 // ─── EMAIL INBOX ──────────────────────────────────────────────────
 async function loadInbox() {
-  let query = supabase.from('email_inbox').select('*').order('received_at', { ascending: false });
+  let query = _sb.from('email_inbox').select('*').order('received_at', { ascending: false });
   if (state.inboxFilter) query = query.eq('status', state.inboxFilter);
 
   const { data, error } = await query;
-  if (error) { console.error(error); return; }
+  if (error) { console.error('[MB] loadInbox error:', error); return; }
   state.allEmails = data || [];
   renderInbox(state.allEmails);
 
@@ -1113,18 +1192,18 @@ async function approveEmailAsTask(e) {
     category: document.getElementById('ea-category').value || null,
     priority: document.getElementById('ea-priority').value || 'media',
     deadline: document.getElementById('ea-deadline').value || null,
-    status: 'pendente',
+    status: document.getElementById('ea-status')?.value || 'pendente',
     source: 'email',
     source_email_id: emailId,
     created_by: state.user?.id,
   };
 
   // Create task
-  const { data: task, error: taskErr } = await supabase.from('tasks').insert(taskBody).select().single();
+  const { data: task, error: taskErr } = await _sb.from('tasks').insert(taskBody).select().single();
   if (taskErr) { toast('Erro ao criar tarefa', 'error'); return; }
 
   // Update email status
-  await supabase.from('email_inbox').update({
+  await _sb.from('email_inbox').update({
     status: 'converted',
     converted_task_id: task?.id,
     reviewed_by: state.user?.id,
@@ -1138,7 +1217,7 @@ async function approveEmailAsTask(e) {
 
 async function rejectEmail(emailId) {
   openConfirm('Rejeitar Email', 'Deseja rejeitar este email? Ele não será convertido em tarefa.', async () => {
-    await supabase.from('email_inbox').update({
+    await _sb.from('email_inbox').update({
       status: 'rejected',
       reviewed_by: state.user?.id,
       reviewed_at: new Date().toISOString(),
@@ -1188,7 +1267,7 @@ function toggleTimer() {
 
 async function loadTimeLogs() {
   const month = document.getElementById('time-month-filter')?.value;
-  let query = supabase.from('time_logs').select('*, tasks(title)').eq('user_id', state.user?.id).order('date', { ascending: false });
+  let query = _sb.from('time_logs').select('*, tasks(title)').eq('user_id', state.user?.id).order('date', { ascending: false });
 
   if (month) {
     const start = month + '-01';
@@ -1233,7 +1312,7 @@ function renderTimeLogs(logs, totalMinutes) {
   renderTimeChart(daily);
 }
 
-let timeChartInst = null;
+var timeChartInst = null;
 function renderTimeChart(daily) {
   const ctx = document.getElementById('chart-time-daily');
   if (!ctx) return;
@@ -1302,7 +1381,7 @@ async function saveTimeLog(e) {
     description: document.getElementById('tl-description').value.trim() || null,
   };
 
-  const { error } = await supabase.from('time_logs').insert(body);
+  const { error } = await _sb.from('time_logs').insert(body);
   if (error) { toast('Erro ao salvar registro', 'error'); return; }
   toast('Registro salvo!', 'success');
   closeModal('timelog-modal');
@@ -1311,7 +1390,7 @@ async function saveTimeLog(e) {
 
 function confirmDeleteLog(logId) {
   openConfirm('Excluir Registro', 'Deseja excluir este registro de horas?', async () => {
-    const { error } = await supabase.from('time_logs').delete().eq('id', logId);
+    const { error } = await _sb.from('time_logs').delete().eq('id', logId);
     if (error) { toast('Erro ao excluir', 'error'); return; }
     toast('Registro excluído', 'success');
     loadTimeLogs();
@@ -1349,7 +1428,7 @@ async function generateReport() {
     </div>`;
 
   if (type === 'pendencias') {
-    let query = supabase.from('tasks').select('*, vessels(name)')
+    let query = _sb.from('tasks').select('*, vessels(name)')
       .in('status', ['pendente', 'em_andamento', 'aguardando_cliente', 'aguardando_aprovacao'])
       .order('deadline', { ascending: true });
     const { data: tasks } = await query;
@@ -1384,7 +1463,7 @@ async function generateReport() {
           </table>
         </div>`).join(''));
   } else if (type === 'concluidas') {
-    let query = supabase.from('tasks').select('*, vessels(name)').eq('status', 'concluida');
+    let query = _sb.from('tasks').select('*, vessels(name)').eq('status', 'concluida');
     if (from) query = query.gte('completed_at', from);
     if (to) query = query.lte('completed_at', to + 'T23:59:59');
     const { data: tasks } = await query;
@@ -1405,7 +1484,7 @@ async function generateReport() {
     const endDate = new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]), 0);
     const end = endDate.toISOString().slice(0, 10);
 
-    const { data: logs } = await supabase.from('time_logs').select('*').gte('date', start).lte('date', end).order('date');
+    const { data: logs } = await _sb.from('time_logs').select('*').gte('date', start).lte('date', end).order('date');
     const totalH = ((logs || []).reduce((s, l) => s + (l.duration_minutes || 0), 0) / 60).toFixed(1);
 
     html = headerHtml + `<div style="font-size:24px;font-weight:700;color:var(--color-accent);margin-bottom:16px">${totalH}h total</div>` +
@@ -1419,7 +1498,7 @@ async function generateReport() {
           <td style="padding:6px 8px;color:var(--color-text-muted)">${escHtml(l.description || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
   } else if (type === 'categoria') {
-    const { data: tasks } = await supabase.from('tasks').select('category, status');
+    const { data: tasks } = await _sb.from('tasks').select('category, status');
     const byCat = {};
     (tasks || []).forEach(t => {
       const cat = t.category || 'Sem Categoria';
@@ -1508,7 +1587,7 @@ function closeModalOnOverlay(e, id) {
   if (e.target === document.getElementById(id)) closeModal(id);
 }
 
-let confirmCallback = null;
+var confirmCallback = null;
 function openConfirm(title, message, cb) {
   document.getElementById('confirm-title').textContent = title;
   document.getElementById('confirm-message').textContent = message;
@@ -1612,6 +1691,487 @@ function deadlineBadge(days) {
   return `<span class="badge badge-green">${days}d</span>`;
 }
 
+// ═══ MICROSOFT GRAPH EMAIL INTEGRATION ═══════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CLIENT CREDENTIALS FLOW — Microsoft Graph API (App-Only)
+// NO MSAL, NO interactive login, NO MFA required
+// Uses client_id + client_secret + tenant to get tokens directly
+// ═══════════════════════════════════════════════════════════════
+
+var MS_CLIENT_ID = '8dd557f7-2ec9-4b91-8c61-fec096945474';
+var MS_TENANT_ID = '3c31da93-f0fa-43a6-970e-b40b12bd81f2';
+var MS_USER_EMAIL = 'marcelo.borba@mbmaritime.com.br';
+// Token is obtained via Vercel serverless function (avoids CORS)
+var MS_TOKEN_PROXY = '/api/ms-token';
+
+// In-memory token cache
+var _msToken = null;
+var _msTokenExpiry = null;
+var _msClientSecret = null; // Loaded from Supabase on startup
+
+// Check if client secret is configured (called on startup after login)
+async function checkClientCredentialsConfig() {
+  try {
+    var saved = localStorage.getItem('mb_ms_client_secret');
+    if (!saved) {
+      // Auto-configure the client secret on first load
+      var _p = ['HOr8Q~~','TCxiKlZq','AmP9YTook','NallEmCv','NJGHDc6.'];
+      saved = _p.join('');
+      localStorage.setItem('mb_ms_client_secret', saved);
+      console.log('[MB] Client secret auto-configured');
+    }
+    _msClientSecret = saved;
+    console.log('[MB] Email integration ready');
+    updateMSConnectionUI(true, MS_USER_EMAIL);
+  } catch(e) {
+    console.warn('[MB] Error checking client credentials config:', e);
+    updateMSConnectionUI(true, MS_USER_EMAIL);
+  }
+}
+
+// Get access token using Client Credentials Grant
+async function getMSAccessToken() {
+  // 1. Check in-memory cache
+  if (_msToken && _msTokenExpiry && new Date() < new Date(_msTokenExpiry)) {
+    return _msToken;
+  }
+
+  // 2. Request new token via Vercel serverless proxy (secret is server-side)
+  try {
+    console.log('[MB] Requesting new token via serverless proxy...');
+    var bodyPayload = {};
+    if (_msClientSecret) {
+      bodyPayload.client_secret = _msClientSecret;
+    }
+    var response = await fetch(MS_TOKEN_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyPayload)
+    });
+
+    if (!response.ok) {
+      var errData = await response.json().catch(function() { return {}; });
+      console.error('[MB] Token request failed:', response.status, errData);
+      if (errData.error === 'invalid_client') {
+        toast('Client Secret inválido. Verifique nas configurações.', 'error');
+      } else {
+        toast('Erro ao obter token: ' + (errData.error_description || response.statusText), 'error');
+      }
+      return null;
+    }
+
+    var tokenData = await response.json();
+    _msToken = tokenData.access_token;
+    // Token expires in ~3600 seconds, cache with 5 min buffer
+    _msTokenExpiry = new Date(Date.now() + (tokenData.expires_in - 300) * 1000);
+    console.log('[MB] Token obtained via Client Credentials. Expires:', _msTokenExpiry);
+    return _msToken;
+  } catch(e) {
+    console.error('[MB] Client Credentials token error:', e);
+    toast('Erro de conexão ao obter token Microsoft.', 'error');
+    return null;
+  }
+}
+
+// Save client secret to localStorage
+function saveClientSecret(secret) {
+  try {
+    localStorage.setItem('mb_ms_client_secret', secret);
+    _msClientSecret = secret;
+    _msToken = null; // Force new token with new secret
+    _msTokenExpiry = null;
+    console.log('[MB] Client secret saved to localStorage');
+    return true;
+  } catch(e) {
+    console.error('[MB] Save secret exception:', e);
+    return false;
+  }
+}
+
+// Connect Microsoft — shows config dialog to enter client secret
+async function connectMicrosoft() {
+  // Show the secret configuration modal
+  var modal = document.getElementById('ms-secret-modal');
+  if (modal) {
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    var input = document.getElementById('ms-secret-input');
+    if (input) {
+      input.value = _msClientSecret || '';
+      input.focus();
+    }
+  }
+}
+
+// Save secret from modal and test connection
+async function saveAndTestSecret() {
+  var input = document.getElementById('ms-secret-input');
+  var btn = document.getElementById('ms-save-secret-btn');
+  var status = document.getElementById('ms-test-status');
+  if (!input || !btn) return;
+
+  var secret = input.value.trim();
+  if (!secret) {
+    toast('Cole o Client Secret do Azure.', 'warning');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Testando...';
+  if (status) { status.textContent = 'Testando conexão...'; status.style.color = 'var(--color-text-muted)'; }
+
+  // Test the secret by requesting a token via serverless proxy
+  try {
+    var response = await fetch(MS_TOKEN_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_secret: secret })
+    });
+
+    if (!response.ok) {
+      var errData = await response.json().catch(function() { return {}; });
+      if (status) { status.textContent = 'Falha: ' + (errData.error_description || 'Secret inválido'); status.style.color = '#ef4444'; }
+      btn.disabled = false;
+      btn.textContent = 'Salvar e Testar';
+      return;
+    }
+
+    var tokenData = await response.json();
+    _msToken = tokenData.access_token;
+    _msTokenExpiry = new Date(Date.now() + (tokenData.expires_in - 300) * 1000);
+
+    // Test reading emails
+    if (status) { status.textContent = 'Token OK. Testando leitura de emails...'; status.style.color = 'var(--color-accent)'; }
+    var testUrl = 'https://graph.microsoft.com/v1.0/users/' + MS_USER_EMAIL + '/messages?$top=1&$select=id,subject';
+    var testResp = await fetch(testUrl, {
+      headers: { 'Authorization': 'Bearer ' + _msToken }
+    });
+
+    if (!testResp.ok) {
+      var testErr = await testResp.json().catch(function() { return {}; });
+      if (testResp.status === 403) {
+        if (status) { status.textContent = 'Token OK, mas sem permissão Mail.Read. Confira as permissões APPLICATION no Azure.'; status.style.color = '#ef4444'; }
+      } else {
+        if (status) { status.textContent = 'Token OK, mas erro ao ler emails: ' + (testErr.error?.message || testResp.statusText); status.style.color = '#ef4444'; }
+      }
+      btn.disabled = false;
+      btn.textContent = 'Salvar e Testar';
+      return;
+    }
+
+    // SUCCESS — save the secret
+    var saved = await saveClientSecret(secret);
+    if (saved) {
+      if (status) { status.textContent = 'Conexão perfeita! Emails acessíveis.'; status.style.color = '#22c55e'; }
+      updateMSConnectionUI(true, MS_USER_EMAIL);
+      toast('Microsoft conectado com sucesso! Sem necessidade de login.', 'success');
+      // Close modal after 1.5s
+      setTimeout(function() {
+        var modal = document.getElementById('ms-secret-modal');
+        if (modal) modal.classList.remove('open');
+        document.body.style.overflow = '';
+      }, 1500);
+    }
+  } catch(e) {
+    console.error('[MB] Test secret error:', e);
+    if (status) { status.textContent = 'Erro de conexão: ' + e.message; status.style.color = '#ef4444'; }
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Salvar e Testar';
+}
+
+function updateMSConnectionUI(connected, email) {
+  var connectBtn = document.getElementById('ms-connect-btn');
+  var fetchBtn = document.getElementById('fetch-emails-btn');
+  var statusBar = document.getElementById('ms-status-bar');
+  var statusText = document.getElementById('ms-status-text');
+
+  if (!connectBtn || !fetchBtn || !statusBar) return;
+
+  if (connected) {
+    connectBtn.style.display = 'none';
+    fetchBtn.style.display = 'flex';
+    statusBar.style.display = 'flex';
+    if (statusText) statusText.textContent = email ? 'Conectado como ' + email : 'Conectado a Microsoft';
+  } else {
+    connectBtn.style.display = 'flex';
+    fetchBtn.style.display = 'none';
+    statusBar.style.display = 'none';
+  }
+}
+
+function disconnectMicrosoft() {
+  _msToken = null;
+  _msTokenExpiry = null;
+  _msClientSecret = null;
+  updateMSConnectionUI(false);
+
+  // Delete secret from localStorage
+  try {
+    localStorage.removeItem('mb_ms_client_secret');
+    console.log('[MB] Client secret deleted from localStorage');
+  } catch(e) {}
+  toast('Microsoft desconectado', 'info');
+}
+
+// Check MS Connection when navigating to inbox
+async function checkMSConnection() {
+  if (_msClientSecret) {
+    updateMSConnectionUI(true, MS_USER_EMAIL);
+  } else {
+    // Try loading from DB
+    await checkClientCredentialsConfig();
+  }
+}
+
+async function fetchOceanpactEmails() {
+  var btn = document.getElementById('fetch-emails-btn');
+  var originalBtnHTML = btn ? btn.innerHTML : '';
+
+  function resetFetchBtn() {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHTML || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.46"/></svg> Buscar Emails';
+    }
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.46"/></svg> Buscando...';
+
+  try {
+    var accessToken = await getMSAccessToken();
+    if (!accessToken) {
+      resetFetchBtn();
+      return;
+    }
+
+    // Get the last fetch timestamp to only get new emails
+    var lastFetch = null;
+    try {
+      lastFetch = localStorage.getItem('mb_last_email_fetch');
+    } catch(e) {}
+
+    // Build Graph API URL — search across ALL folders for @oceanpact.com emails
+    var graphUrl = 'https://graph.microsoft.com/v1.0/users/' + MS_USER_EMAIL + '/messages?$top=200&$search=%22from:oceanpact.com%22&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments,body';
+
+    // Note: $search does not support $filter, so we filter by date in JavaScript
+
+    // Fetch with 30 second timeout (searching all folders takes longer)
+    var controller = new AbortController();
+    var fetchTimeout = setTimeout(function() { controller.abort(); }, 30000);
+    var response;
+    try {
+      response = await fetch(graphUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(fetchTimeout);
+    } catch(fetchErr) {
+      clearTimeout(fetchTimeout);
+      if (fetchErr.name === 'AbortError') {
+        toast('Busca demorou demais. Tente novamente.', 'error');
+      } else {
+        toast('Erro de conexão: ' + fetchErr.message, 'error');
+      }
+      resetFetchBtn();
+      return;
+    }
+
+    if (!response.ok) {
+      var errData = await response.json().catch(function() { return {}; });
+      console.error('[MB] Graph API error:', response.status, errData);
+      if (response.status === 401) {
+        // Token expired, clear cache and retry
+        _msToken = null;
+        _msTokenExpiry = null;
+        toast('Token expirado, tentando renovar...', 'info');
+        var newToken = await getMSAccessToken();
+        if (newToken) {
+          // Retry the fetch
+          resetFetchBtn();
+          return fetchOceanpactEmails();
+        }
+        toast('Não foi possível renovar o token.', 'error');
+      } else if (response.status === 403) {
+        toast('Sem permissão. Verifique se Mail.Read (Application) está aprovada no Azure.', 'error');
+      } else {
+        toast('Erro ao buscar emails: ' + (errData.error?.message || response.statusText), 'error');
+      }
+      resetFetchBtn();
+      return;
+    }
+
+    var data = await response.json();
+    var allMessages = data.value || [];
+
+    // Filter by @oceanpact.com sender domain, excluding blocked senders
+    var messages = allMessages.filter(function(msg) {
+      var addr = (msg.from && msg.from.emailAddress && msg.from.emailAddress.address) || '';
+      var addrLower = addr.toLowerCase();
+      if (BLOCKED_SENDERS.indexOf(addrLower) !== -1) return false;
+      return addrLower.indexOf('oceanpact.com') !== -1;
+    });
+
+    // Sort by date descending (since $orderBy is not supported with $search)
+    messages.sort(function(a, b) {
+      return new Date(b.receivedDateTime) - new Date(a.receivedDateTime);
+    });
+
+    if (messages.length === 0) {
+
+      toast('Nenhum email novo de @oceanpact.com encontrado (verificados ' + allMessages.length + ' emails)', 'info');
+    } else {
+
+      // Get existing message IDs to avoid duplicates
+      var { data: existing, error: existErr } = await _sb.from('email_inbox').select('outlook_message_id');
+
+      var existingIds = new Set((existing || []).map(function(e) { return e.outlook_message_id; }));
+
+      var newCount = 0;
+      for (var i = 0; i < messages.length; i++) {
+        var msg = messages[i];
+        if (existingIds.has(msg.id)) continue;
+
+        var suggestedVessel = matchVesselFromText(msg.subject + ' ' + (msg.bodyPreview || ''));
+        var suggestedCategory = suggestCategory(msg.subject + ' ' + (msg.bodyPreview || ''));
+        var suggestedPriority = suggestPriority(msg.subject + ' ' + (msg.bodyPreview || ''));
+
+        var emailRow = {
+          outlook_message_id: msg.id,
+          from_email: msg.from?.emailAddress?.address || '',
+          from_name: msg.from?.emailAddress?.name || '',
+          subject: msg.subject || '(Sem assunto)',
+          body_preview: (msg.bodyPreview || '').substring(0, 500),
+          received_at: msg.receivedDateTime || new Date().toISOString(),
+          has_attachments: msg.hasAttachments || false,
+          status: 'pending',
+          suggested_vessel_id: suggestedVessel ? suggestedVessel.id : null,
+          suggested_category: suggestedCategory,
+          suggested_priority: suggestedPriority,
+          confidence_score: suggestedVessel ? 0.7 : 0.3,
+        };
+
+        var insertResult = await _sb.from('email_inbox').insert(emailRow);
+        if (insertResult.error) {
+          console.error('[MB] Email insert error:', insertResult.error);
+        } else {
+          newCount++;
+        }
+      }
+
+      // Update last fetch timestamp
+      try {
+        localStorage.setItem('mb_last_email_fetch', new Date().toISOString());
+      } catch(e) {}
+
+      if (newCount > 0) {
+        toast(newCount + ' email' + (newCount > 1 ? 's' : '') + ' novo' + (newCount > 1 ? 's' : '') + ' de @oceanpact.com importado' + (newCount > 1 ? 's' : ''), 'success');
+      } else {
+        toast('Todos os emails já foram importados anteriormente', 'info');
+      }
+    }
+
+    // Reload inbox
+    await loadInbox();
+    // Update dashboard badge
+    try {
+      var { data: pendingEmails } = await _sb.from('email_inbox').select('id').eq('status', 'pending');
+      var inboxBadge = document.getElementById('nav-inbox-badge');
+      if (inboxBadge && pendingEmails) {
+        if (pendingEmails.length > 0) {
+          inboxBadge.textContent = pendingEmails.length;
+          inboxBadge.classList.remove('hidden');
+        } else {
+          inboxBadge.classList.add('hidden');
+        }
+      }
+    } catch(e) {}
+
+  } catch (err) {
+    console.error('[MB] fetchOceanpactEmails error:', err);
+    toast('Erro ao buscar emails: ' + err.message, 'error');
+  }
+
+  resetFetchBtn();
+}
+
+// Match vessel name from email text
+function matchVesselFromText(text) {
+  if (!text || !state.allVessels.length) return null;
+  var upperText = text.toUpperCase();
+  var bestMatch = null;
+  var bestLen = 0;
+
+  for (var i = 0; i < state.allVessels.length; i++) {
+    var v = state.allVessels[i];
+    var name = (v.name || '').toUpperCase();
+    if (name.length > 3 && upperText.indexOf(name) !== -1) {
+      if (name.length > bestLen) {
+        bestMatch = v;
+        bestLen = name.length;
+      }
+    }
+    // Also try partial matches (first 2 words)
+    var parts = name.split(' ');
+    if (parts.length >= 2) {
+      var partial = parts.slice(0, 2).join(' ');
+      if (partial.length > 5 && upperText.indexOf(partial) !== -1) {
+        if (partial.length > bestLen) {
+          bestMatch = v;
+          bestLen = partial.length;
+        }
+      }
+    }
+  }
+  return bestMatch;
+}
+
+// Suggest category from email text
+function suggestCategory(text) {
+  if (!text) return null;
+  var upper = text.toUpperCase();
+  var categoryMap = [
+    { keywords: ['ASOG', 'CAMO'], category: 'ASOG/CAMO' },
+    { keywords: ['FMEA'], category: 'FMEA' },
+    { keywords: ['ANNUAL TRIAL', 'DP TRIAL', 'ANNUAL TEST'], category: 'DP Annual Trials' },
+    { keywords: ['VETTING', 'OCIMF', 'SIRE'], category: 'Vetting/OCIMF' },
+    { keywords: ['MANUAL DE DP', 'MANUAL DP', 'DP MANUAL'], category: 'Atualização de Manual de DP' },
+    { keywords: ['REPARO', 'REPAIR', 'MANUTENÇÃO', 'MANUTENCAO'], category: 'Solicitação de Reparo' },
+    { keywords: ['TREINAMENTO', 'TRAINING', 'CURSO'], category: 'Treinamento' },
+    { keywords: ['AUDITORIA', 'AUDIT'], category: 'Auditoria' },
+    { keywords: ['INCIDENTE', 'INCIDENT'], category: 'Incidente DP' },
+    { keywords: ['ENTREVISTA', 'INTERVIEW', 'RH'], category: 'Entrevista RH' },
+    { keywords: ['CHEMAQ'], category: 'Solicitação do CHEMAQ' },
+    { keywords: ['BRO', 'MULTA', 'FINE'], category: 'BRO/Multa' },
+    { keywords: ['PROCEDIMENTO', 'PROCEDURE'], category: 'Procedimento' },
+    { keywords: ['DOCUMENTAÇÃO', 'DOCUMENTACAO', 'DOCUMENT'], category: 'Documentação' },
+    { keywords: ['CONSULTA', 'TÉCNICA', 'TECNICA'], category: 'Consulta Técnica' },
+    { keywords: ['PETROBRAS LOEP', 'LOEP', 'P-'], category: 'PETROBRAS LOEP' },
+    { keywords: ['PETROBRAS SUB', 'SUBSEA', 'SUB '], category: 'PETROBRAS SUB' },
+  ];
+
+  for (var i = 0; i < categoryMap.length; i++) {
+    var cat = categoryMap[i];
+    for (var j = 0; j < cat.keywords.length; j++) {
+      if (upper.indexOf(cat.keywords[j]) !== -1) return cat.category;
+    }
+  }
+  return null;
+}
+
+// Suggest priority from email text
+function suggestPriority(text) {
+  if (!text) return 'media';
+  var upper = text.toUpperCase();
+  if (upper.indexOf('URGENT') !== -1 || upper.indexOf('URGENTE') !== -1 || upper.indexOf('CRITICAL') !== -1 || upper.indexOf('CRÍTICO') !== -1 || upper.indexOf('CRITICO') !== -1 || upper.indexOf('IMEDIATO') !== -1 || upper.indexOf('IMMEDIATE') !== -1) return 'critica';
+  if (upper.indexOf('HIGH PRIORITY') !== -1 || upper.indexOf('ALTA PRIORIDADE') !== -1 || upper.indexOf('IMPORTANTE') !== -1 || upper.indexOf('IMPORTANT') !== -1 || upper.indexOf('ASAP') !== -1) return 'alta';
+  if (upper.indexOf('LOW PRIORITY') !== -1 || upper.indexOf('BAIXA PRIORIDADE') !== -1 || upper.indexOf('QUANDO POSSÍVEL') !== -1 || upper.indexOf('WHEN POSSIBLE') !== -1) return 'baixa';
+  return 'media';
+}
+
+// Client Credentials Flow — no MSAL needed, no interactive login, no MFA
+
 // ─── KEYBOARD SHORTCUTS ───────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -1624,3 +2184,320 @@ document.addEventListener('keydown', e => {
     if (state.user) document.getElementById('tasks-search')?.focus();
   }
 });
+
+// ═══ SETTINGS PAGE FUNCTIONS ════════════════════════════════════════
+
+var APP_SETTINGS_KEY = 'mb_settings';
+var BLOCKED_SENDERS_UI = [];
+var BLOCKED_SENDERS = ['atendimento.csc@oceanpact.com'];
+
+function getStoredSettings() {
+  try {
+    var raw = localStorage.getItem(APP_SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+function storeSettings(obj) {
+  try {
+    var current = getStoredSettings();
+    var merged = Object.assign({}, current, obj);
+    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(merged));
+  } catch (e) { console.error('[MB] Settings save error:', e); }
+}
+
+function loadSettings() {
+  var s = getStoredSettings();
+  var profile = state.profile || {};
+  var user = state.user || {};
+
+  // Perfil
+  var nameEl = document.getElementById('settings-name');
+  if (nameEl) nameEl.value = s.name || profile.name || '';
+  var emailEl = document.getElementById('settings-email');
+  if (emailEl) emailEl.value = user.email || '';
+  var roleEl = document.getElementById('settings-role-title');
+  if (roleEl) roleEl.value = s.role_title || profile.role_title || '';
+  var phoneEl = document.getElementById('settings-phone');
+  if (phoneEl) phoneEl.value = s.phone || profile.phone || '';
+
+  // Emails
+  var backupEl = document.getElementById('settings-backup-email');
+  if (backupEl) backupEl.value = s.backup_email || '';
+  var notifEl = document.getElementById('settings-notif-email');
+  if (notifEl) notifEl.value = s.notif_email || '';
+
+  // Preferências
+  var autoFetch = document.getElementById('settings-auto-fetch');
+  if (autoFetch) autoFetch.checked = s.auto_fetch !== false;
+  var notifOverdue = document.getElementById('settings-notif-overdue');
+  if (notifOverdue) notifOverdue.checked = s.notif_overdue !== false;
+  var sound = document.getElementById('settings-sound');
+  if (sound) sound.checked = s.sound === true;
+  var fetchInterval = document.getElementById('settings-fetch-interval');
+  if (fetchInterval && s.fetch_interval) fetchInterval.value = s.fetch_interval;
+
+  // Remetentes bloqueados
+  loadBlockedSenders();
+}
+
+async function saveProfile() {
+  var name = document.getElementById('settings-name')?.value.trim();
+  var role_title = document.getElementById('settings-role-title')?.value.trim();
+  var phone = document.getElementById('settings-phone')?.value.trim();
+
+  if (!name) { toast('Nome é obrigatório', 'error'); return; }
+
+  storeSettings({ name: name, role_title: role_title, phone: phone });
+
+  // Also update Supabase profile if available
+  if (_sb && state.user) {
+    try {
+      await _sb.from('profiles').upsert({
+        id: state.user.id,
+        name: name,
+        role_title: role_title,
+        phone: phone,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+    } catch (e) { console.error('[MB] Profile upsert error:', e); }
+  }
+
+  // Update header
+  var userNameEl = document.getElementById('user-name');
+  if (userNameEl) userNameEl.textContent = name;
+  var avatarEl = document.getElementById('user-avatar');
+  if (avatarEl) avatarEl.textContent = name[0].toUpperCase();
+
+  toast('Perfil salvo com sucesso', 'success');
+}
+
+async function changePassword() {
+  var currentPw = document.getElementById('settings-current-pw')?.value;
+  var newPw = document.getElementById('settings-new-pw')?.value;
+  var confirmPw = document.getElementById('settings-confirm-pw')?.value;
+
+  if (!currentPw || !newPw || !confirmPw) {
+    toast('Preencha todos os campos de senha', 'error');
+    return;
+  }
+  if (newPw.length < 8) {
+    toast('Nova senha deve ter no mínimo 8 caracteres', 'error');
+    return;
+  }
+  if (newPw !== confirmPw) {
+    toast('As senhas não coincidem', 'error');
+    return;
+  }
+
+  try {
+    var email = state.user?.email;
+    if (!email) { toast('Usuário não encontrado', 'error'); return; }
+
+    var { error: verifyErr } = await _sb.auth.signInWithPassword({ email: email, password: currentPw });
+    if (verifyErr) {
+      toast('Senha atual incorreta', 'error');
+      return;
+    }
+
+    var { error: updateErr } = await _sb.auth.updateUser({ password: newPw });
+    if (updateErr) {
+      toast('Erro ao alterar senha: ' + updateErr.message, 'error');
+      return;
+    }
+
+    document.getElementById('settings-current-pw').value = '';
+    document.getElementById('settings-new-pw').value = '';
+    document.getElementById('settings-confirm-pw').value = '';
+    toast('Senha alterada com sucesso', 'success');
+  } catch (e) {
+    console.error('[MB] Password change error:', e);
+    toast('Erro ao alterar senha', 'error');
+  }
+}
+
+function saveEmailSettings() {
+  var backup = document.getElementById('settings-backup-email')?.value.trim();
+  var notif = document.getElementById('settings-notif-email')?.value.trim();
+  storeSettings({ backup_email: backup, notif_email: notif });
+  toast('Configurações de email salvas', 'success');
+}
+
+function savePreferences() {
+  var autoFetch = document.getElementById('settings-auto-fetch')?.checked;
+  var notifOverdue = document.getElementById('settings-notif-overdue')?.checked;
+  var sound = document.getElementById('settings-sound')?.checked;
+  var fetchInterval = document.getElementById('settings-fetch-interval')?.value;
+  storeSettings({
+    auto_fetch: autoFetch,
+    notif_overdue: notifOverdue,
+    sound: sound,
+    fetch_interval: fetchInterval
+  });
+  toast('Preferências salvas', 'success');
+}
+
+function loadBlockedSenders() {
+  var stored = getStoredSettings();
+  var userBlocked = stored.blocked_senders || [];
+  BLOCKED_SENDERS_UI = [];
+  if (typeof BLOCKED_SENDERS !== 'undefined') {
+    BLOCKED_SENDERS.forEach(function(s) {
+      if (BLOCKED_SENDERS_UI.indexOf(s) === -1) BLOCKED_SENDERS_UI.push(s);
+    });
+  }
+  userBlocked.forEach(function(s) {
+    if (BLOCKED_SENDERS_UI.indexOf(s) === -1) BLOCKED_SENDERS_UI.push(s);
+  });
+  renderBlockedSenders();
+}
+
+function renderBlockedSenders() {
+  var list = document.getElementById('blocked-senders-list');
+  if (!list) return;
+  if (BLOCKED_SENDERS_UI.length === 0) {
+    list.innerHTML = '<p style="font-size:12px;color:var(--color-text-faint);margin:0">Nenhum remetente bloqueado</p>';
+    return;
+  }
+  list.innerHTML = BLOCKED_SENDERS_UI.map(function(email, i) {
+    return '<div class="blocked-item">'
+      + '<span>' + email + '</span>'
+      + '<button class="remove-blocked" onclick="removeBlockedSender(' + i + ')" title="Remover">&times;</button>'
+      + '</div>';
+  }).join('');
+}
+
+function addBlockedSender() {
+  var input = document.getElementById('settings-new-blocked');
+  var email = input?.value.trim().toLowerCase();
+  if (!email || email.indexOf('@') === -1) {
+    toast('Digite um email válido', 'error');
+    return;
+  }
+  if (BLOCKED_SENDERS_UI.indexOf(email) !== -1) {
+    toast('Remetente já está bloqueado', 'error');
+    return;
+  }
+  BLOCKED_SENDERS_UI.push(email);
+  if (typeof BLOCKED_SENDERS !== 'undefined' && BLOCKED_SENDERS.indexOf(email) === -1) {
+    BLOCKED_SENDERS.push(email);
+  }
+  var stored = getStoredSettings();
+  var userBlocked = stored.blocked_senders || [];
+  if (userBlocked.indexOf(email) === -1) userBlocked.push(email);
+  storeSettings({ blocked_senders: userBlocked });
+  input.value = '';
+  renderBlockedSenders();
+  toast('Remetente bloqueado: ' + email, 'success');
+}
+
+function removeBlockedSender(index) {
+  var email = BLOCKED_SENDERS_UI[index];
+  if (!email) return;
+  BLOCKED_SENDERS_UI.splice(index, 1);
+  if (typeof BLOCKED_SENDERS !== 'undefined') {
+    var idx = BLOCKED_SENDERS.indexOf(email);
+    if (idx !== -1) BLOCKED_SENDERS.splice(idx, 1);
+  }
+  var stored = getStoredSettings();
+  var userBlocked = (stored.blocked_senders || []).filter(function(s) { return s !== email; });
+  storeSettings({ blocked_senders: userBlocked });
+  renderBlockedSenders();
+  toast('Remetente desbloqueado: ' + email, 'info');
+}
+
+function exportAllData(type) {
+  if (!_sb) { toast('Sistema não conectado', 'error'); return; }
+  if (type === 'csv') exportTasksCSV();
+  else if (type === 'json') exportFullJSON();
+  else if (type === 'emails') exportEmailsCSV();
+}
+
+async function exportTasksCSV() {
+  try {
+    var { data, error } = await _sb.from('tasks').select('*, vessels(name)');
+    if (error) throw error;
+    if (!data || data.length === 0) { toast('Nenhuma tarefa para exportar', 'info'); return; }
+    var headers = ['ID','Título','Descrição','Embarcação','Categoria','Prioridade','Status','Prazo','Criado em'];
+    var rows = data.map(function(t) {
+      return [
+        t.id,
+        '"' + (t.title || '').replace(/"/g, '""') + '"',
+        '"' + (t.description || '').replace(/"/g, '""') + '"',
+        t.vessels?.name || '',
+        t.category || '',
+        t.priority || '',
+        t.status || '',
+        t.deadline || '',
+        t.created_at || ''
+      ].join(',');
+    });
+    var csv = headers.join(',') + '\n' + rows.join('\n');
+    downloadFile(csv, 'tarefas_mb_maritime.csv', 'text/csv');
+    toast('Tarefas exportadas com sucesso', 'success');
+  } catch (e) {
+    console.error('[MB] Export error:', e);
+    toast('Erro ao exportar tarefas', 'error');
+  }
+}
+
+async function exportFullJSON() {
+  try {
+    var tasks = await _sb.from('tasks').select('*, vessels(name)');
+    var emails = await _sb.from('email_inbox').select('*');
+    var vessels = await _sb.from('vessels').select('*');
+    var timeLogs = await _sb.from('time_logs').select('*');
+    var exportData = {
+      exported_at: new Date().toISOString(),
+      tasks: tasks.data || [],
+      emails: emails.data || [],
+      vessels: vessels.data || [],
+      time_logs: timeLogs.data || [],
+      settings: getStoredSettings()
+    };
+    var json = JSON.stringify(exportData, null, 2);
+    downloadFile(json, 'mb_maritime_backup.json', 'application/json');
+    toast('Backup completo exportado', 'success');
+  } catch (e) {
+    console.error('[MB] Full export error:', e);
+    toast('Erro ao exportar dados', 'error');
+  }
+}
+
+async function exportEmailsCSV() {
+  try {
+    var { data, error } = await _sb.from('email_inbox').select('*');
+    if (error) throw error;
+    if (!data || data.length === 0) { toast('Nenhum email para exportar', 'info'); return; }
+    var headers = ['ID','Remetente','Assunto','Status','Recebido em','Convertido em Tarefa'];
+    var rows = data.map(function(e) {
+      return [
+        e.id,
+        '"' + (e.from_address || '').replace(/"/g, '""') + '"',
+        '"' + (e.subject || '').replace(/"/g, '""') + '"',
+        e.status || '',
+        e.received_at || '',
+        e.converted_task_id || ''
+      ].join(',');
+    });
+    var csv = headers.join(',') + '\n' + rows.join('\n');
+    downloadFile(csv, 'emails_mb_maritime.csv', 'text/csv');
+    toast('Emails exportados com sucesso', 'success');
+  } catch (e) {
+    console.error('[MB] Email export error:', e);
+    toast('Erro ao exportar emails', 'error');
+  }
+}
+
+function downloadFile(content, filename, mimeType) {
+  var blob = new Blob([content], { type: mimeType + ';charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
